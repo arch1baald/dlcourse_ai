@@ -1,21 +1,60 @@
 import numpy as np
 
 
-def softmax(predictions):
+def softmax(logits):
     '''
-    Computes probabilities from scores
+    Computes probabilities from logits
 
     Arguments:
-      predictions, np array, shape is either (N) or (batch_size, N) -
+      logits, np array, shape is either (N) or (batch_size, N) -
         classifier output
 
     Returns:
-      probs, np array of the same shape as predictions - 
+      probs, np array of the same shape as logits - 
         probability for every class, 0..1
     '''
     # TODO implement softmax
     # Your final implementation shouldn't have any loops
-    raise Exception("Not implemented!")
+#     shifted_logits = logits - np.max(logits, axis=1)
+#     probs = np.exp(shifted_logits) / np.sum(np.exp(shifted_logits))
+
+#   Example for better understanding of np.newaxis
+#     asdf = np.array(
+#         [[ 2., -1., -1.,  1.],
+#         [ 0.,  1.,  1.,  1.],
+#         [ 1.,  2., -1.,  2.]]
+#     )
+#     rmax = np.max(asdf, axis=1)
+#     rmax = rmax[:, np.newaxis]
+#     asdf - rmax
+
+#     Еще проще можно использовать keepdims=True
+#     https://cs231n.github.io/neural-networks-case-study/#grad
+#     asdf = np.array(
+#         [[ 2., -1., -1.,  1.],
+#         [ 0.,  1.,  1.,  1.],
+#         [ 1.,  2., -1.,  2.]]
+#     )
+#     rmax = np.max(asdf, axis=1, keepdims=True)
+#     asdf - rmax
+
+#     if len(logits.shape) == 1:
+#         logits = logits.copy().reshape(1, -1)
+
+#     row_max = np.max(logits, axis=1)
+#     row_max = row_max[:, np.newaxis]
+#     shifted_logits = logits - row_max
+#     exponents = np.exp(shifted_logits)
+#     denum = np.sum(exponents, axis=1)
+#     denum = denum[:, np.newaxis]
+#     probs = exponents / denum
+
+    if len(logits.shape) == 1:
+        logits = logits.copy().reshape(1, -1)
+    shifted = logits - np.max(logits, axis=1, keepdims=True)
+    exponents = np.exp(shifted)
+    probs = exponents / np.sum(exponents, axis=1, keepdims=True)
+    return probs
 
 
 def cross_entropy_loss(probs, target_index):
@@ -33,29 +72,60 @@ def cross_entropy_loss(probs, target_index):
     '''
     # TODO implement cross-entropy
     # Your final implementation shouldn't have any loops
-    raise Exception("Not implemented!")
+#     loss = -np.log(probs[target_index])
+    b = probs.shape[0]
+    loss = np.mean(-np.log(probs[np.arange(b), target_index]))
+    return loss
 
 
-def softmax_with_cross_entropy(predictions, target_index):
+def softmax_with_cross_entropy(logits, target_index):
     '''
-    Computes softmax and cross-entropy loss for model predictions,
+    Computes softmax and cross-entropy loss for last linear + softmax layer,
     including the gradient
 
     Arguments:
-      predictions, np array, shape is either (N) or (batch_size, N) -
+      logits, np array, shape is either (N) or (batch_size, N) -
         classifier output
       target_index: np array of int, shape is (1) or (batch_size) -
         index of the true class for given sample(s)
 
     Returns:
       loss, single value - cross-entropy loss
-      dprediction, np array same shape as predictions - gradient of predictions by loss value
+      grad, np array same shape as predictions - gradient of logits by loss value
     '''
     # TODO implement softmax with cross-entropy
     # Your final implementation shouldn't have any loops
-    raise Exception("Not implemented!")
-
-    return loss, dprediction
+    # https://towardsdatascience.com/derivative-of-the-softmax-function-and-the-categorical-cross-entropy-loss-ffceefc081d1
+    # https://eli.thegreenplace.net/2016/the-softmax-function-and-its-derivative/
+    # https://deepnotes.io/softmax-crossentropy
+    # https://cs231n.github.io/neural-networks-case-study/#grad
+    if len(logits.shape) == 1:
+        logits = logits.copy().reshape(1, -1)
+    
+    probs = softmax(logits)    
+    loss = cross_entropy_loss(probs, target_index)
+#     target = np.zeros_like(logits)
+#     target[:, target_index] = 1
+    b = probs.shape[0]
+    k = probs.shape[1]
+    target = np.zeros((b, k), dtype=np.float)
+    if isinstance(target_index, int):
+        target[np.arange(b), target_index] = 1.
+        grad = probs - target
+        grad = grad.reshape(k, )
+    else:
+        target[np.arange(b), target_index.flatten()] = 1.
+        grad = (probs - target) / b
+        
+#     print('probs:')
+#     display(probs)
+#     print('target_represented:')
+#     display(target)
+    
+#     print('loss', loss)
+#     print('grad\n', grad)
+#     print()
+    return loss, grad
 
 
 def l2_regularization(W, reg_strength):
@@ -73,8 +143,11 @@ def l2_regularization(W, reg_strength):
 
     # TODO: implement l2 regularization and gradient
     # Your final implementation shouldn't have any loops
-    raise Exception("Not implemented!")
-
+    
+    # Поэлементное умножение, т.е. возведение в квадрат каждого w_ij
+    W2 = W * W
+    loss = reg_strength * np.sum(W2)
+    grad = 2 * reg_strength * W
     return loss, grad
     
 
@@ -92,12 +165,18 @@ def linear_softmax(X, W, target_index):
       gradient, np.array same shape as W - gradient of weight by loss
 
     '''
-    predictions = np.dot(X, W)
-
+    logits = np.dot(X, W)
+    
     # TODO implement prediction and gradient over W
     # Your final implementation shouldn't have any loops
-    raise Exception("Not implemented!")
+    loss, grad = softmax_with_cross_entropy(logits, target_index)
     
+    # https://cs231n.github.io/neural-networks-case-study/#together
+    # https://cs231n.github.io/optimization-2/
+    # http://cs231n.stanford.edu/vecDerivs.pdf
+    # TODO: Честно разобраться почему именно так перемножаются
+    # Tip: Якобиан (градиент) весов всегода совпадает по размерности с W
+    dW = np.dot(X.T, grad)
     return loss, dW
 
 
@@ -121,7 +200,7 @@ class LinearSoftmaxClassifier():
 
         num_train = X.shape[0]
         num_features = X.shape[1]
-        num_classes = np.max(y)+1
+        num_classes = np.max(y) + 1
         if self.W is None:
             self.W = 0.001 * np.random.randn(num_features, num_classes)
 
@@ -137,11 +216,21 @@ class LinearSoftmaxClassifier():
             # Apply gradient to weights using learning rate
             # Don't forget to add both cross-entropy loss
             # and regularization!
-            raise Exception("Not implemented!")
-
+            loss = 0
+            for idx in batches_indices:
+                X_batch = X[idx, ]
+                logloss, dL_W = linear_softmax(X, self.W, y)
+                regloss, dR_W = l2_regularization(self.W, reg)
+                loss += logloss + regloss
+                grad = dL_W + dR_W
+                self.W -= learning_rate * grad
             # end
             print("Epoch %i, loss: %f" % (epoch, loss))
-
+            loss_history.append(loss)
+            eps = learning_rate / 10
+            if epoch > 0:
+                if np.abs(loss_history[-1] - loss_history[-2]) < eps:
+                    break
         return loss_history
 
     def predict(self, X):
@@ -158,15 +247,7 @@ class LinearSoftmaxClassifier():
 
         # TODO Implement class prediction
         # Your final implementation shouldn't have any loops
-        raise Exception("Not implemented!")
-
+        logits = np.dot(X, self.W)
+        probs = softmax(logits)
+        y_pred = np.argmax(probs, axis=1)
         return y_pred
-
-
-
-                
-                                                          
-
-            
-
-                
