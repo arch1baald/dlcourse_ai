@@ -1,3 +1,6 @@
+import numpy as np
+
+
 def multiclass_accuracy(prediction, ground_truth):
     """
     Computes metrics for multiclass classification
@@ -9,8 +12,8 @@ def multiclass_accuracy(prediction, ground_truth):
     Returns:
     accuracy - ratio of accurate predictions to total samples
     """
-
-    # TODO: Implement computing accuracy
-    raise Exception("Not implemented!")
-
-    return 0
+    from sklearn.metrics import confusion_matrix
+    
+    conf = confusion_matrix(ground_truth, prediction)
+    accuracy = np.trace(conf) / np.sum(conf)
+    return accuracy
