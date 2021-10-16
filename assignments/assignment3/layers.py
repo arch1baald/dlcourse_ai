@@ -155,7 +155,7 @@ class ConvolutionalLayer:
         filter_size, int - size of the conv filter
         padding, int - number of 'pixels' to pad on each side
         '''
-
+        self.X = None
         self.filter_size = filter_size
         self.in_channels = in_channels
         self.n_filters = n_filters
@@ -168,6 +168,7 @@ class ConvolutionalLayer:
         self.stride = stride
 
     def forward(self, X):
+        self.X = X.copy()
         batch_size, input_height, input_width, in_channels = X.shape
         out_height, out_width = self.get_output_shape(input_height, input_width)
         
@@ -179,6 +180,7 @@ class ConvolutionalLayer:
                 x_end = x_start + self.filter_size
                 y_start = y * self.stride
                 y_end = y_start + self.filter_size
+                # Не забыть про reshape!
                 w = self.W.value.reshape(self.n_filters, self.filter_size, self.filter_size, in_channels)
                 filtered = w * X[:, np.newaxis, y_start:y_end, x_start:x_end, :]
                 z[:, :, y, x] = np.sum(filtered, axis=(2, 3, 4))
@@ -193,8 +195,10 @@ class ConvolutionalLayer:
         # You already know how to backprop through that
         # when you implemented FullyConnectedLayer
         # Just do it the same number of times and accumulate gradients
+        if self.X is None:
+            raise Exception('Backward before forward')
 
-        batch_size, height, width, channels = X.shape
+        batch_size, height, width, channels = self.X.shape
         _, out_height, out_width, n_filters = d_out.shape
 
         # TODO: Implement backward pass
@@ -204,15 +208,44 @@ class ConvolutionalLayer:
 
         # Try to avoid having any other loops here too
         
+        d_input = np.zeros_like(self.X).astype(np.float)
         # Не проебать момент, что в forward reshape W!
         for y in range(out_height):
             for x in range(out_width):
                 # TODO: Implement backward pass for specific location
                 # Aggregate gradients for both the input and
                 # the parameters (W and B)
-                pass
-
-        raise Exception("Not implemented!")
+                x_start = x * self.stride
+                x_end = x_start + self.filter_size
+                y_start = y * self.stride
+                y_end = y_start + self.filter_size
+#         https://github.com/SkalskiP/ILearnDeepLearning.py/blob/master/01_mysteries_of_neural_networks/06_numpy_convolutional_neural_net/src/layers/convolutional.py#L103
+# Возможно стоит задить хуй на сведение к FC и сделать как просто в Conv ^
+                X_local = self.X[:, y_start:y_end, x_start:x_end, :]
+                original_local_shape = X_local.shape
+                hwc = self.filter_size * self.filter_size * self.in_channels
+                X_local = X_local.reshape(batch_size, hwc)
+                w = self.W.value.reshape(hwc, self.n_filters)
+                b = self.B.value.reshape(1, self.n_filters)
+                fc = FullyConnectedLayer(*w.shape)
+                fc.X = X_local
+                fc.W.value = w
+                fc.B.value = b
+                d_local_out = d_out[:, y, x, :]
+                
+                d_local_input = fc.backward(d_local_out)
+                # Полный проеб
+                d_local_input = d_local_input.reshape(*original_local_shape)
+                d_input[:, y_start:y_end, x_start:x_end, :] += d_local_input
+#                 # Где-то проеб с порядком индексов в 2х2, в 3х3 вообще не работает
+                w_grad = fc.W.grad.reshape(*self.W.grad.shape)
+#                 w_grad = fc.W.grad.reshape(self.n_filters, self.filter_size, self.filter_size, self.in_channels)
+#                 w_grad = fc.W.grad.reshape(self.filter_size, self.filter_size, self.in_channels, self.n_filters)
+                self.W.grad += w_grad
+                # Все окей
+                b_grad = fc.B.grad.reshape(*self.B.grad.shape)
+                self.B.grad += b_grad
+        return d_input
 
     def params(self):
         return { 'W': self.W, 'B': self.B }
